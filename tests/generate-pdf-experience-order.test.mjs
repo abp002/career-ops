@@ -172,6 +172,16 @@ expectThrows('reads a job-period element after a quoted attribute that contains 
   validateCvExperienceOrder(
     '<span title="a > b" class="job-period">2015 – 2018</span><span title="a > b" class="job-period">2019 – 2022</span>'));
 
+// A child element with the same tag name does not close the job-period. Taking
+// the child's closing tag as the end cut the period off before its dates.
+expectThrows('reads a job-period element that contains a nested element with the same tag', () =>
+  validateCvExperienceOrder(
+    '<div class="job-period"><div class="badge"></div>2015 – 2018</div><div class="job-period"><div class="badge"></div>2019 – 2022</div>'));
+
+expectOk('reads each nested job-period element up to its own closing tag', () =>
+  validateCvExperienceOrder(
+    '<div class="job-period"><div><div class="badge"></div></div>2019 – 2022</div><div class="job-period"><div class="badge"></div>2015 – 2018</div>'));
+
 {
   const warnings = [];
   const originalWarn = console.warn;

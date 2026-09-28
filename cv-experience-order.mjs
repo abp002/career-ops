@@ -101,12 +101,19 @@ function jobPeriodContents(html) {
   let tag;
   while ((tag = tags.exec(html)) !== null) {
     if (!hasJobPeriodClass(tag[2])) continue;
-    const close = new RegExp(`</${tag[1]}\\s*>`, 'gi');
-    close.lastIndex = tags.lastIndex;
-    const end = close.exec(html);
-    if (end === null) continue;
+    // Count nested elements with the same tag name, so a child's closing tag
+    // does not end the job-period.
+    const sameTag = new RegExp(`<(/?)${tag[1]}\\b((?:[^>"']|"[^"]*"|'[^']*')*)>`, 'gi');
+    sameTag.lastIndex = tags.lastIndex;
+    let depth = 1;
+    let end;
+    while (depth > 0 && (end = sameTag.exec(html)) !== null) {
+      if (end[1]) depth--;
+      else if (!end[2].trimEnd().endsWith('/')) depth++;
+    }
+    if (depth > 0) continue;
     contents.push(html.slice(tags.lastIndex, end.index));
-    tags.lastIndex = close.lastIndex;
+    tags.lastIndex = sameTag.lastIndex;
   }
   return contents;
 }
