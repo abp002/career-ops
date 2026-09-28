@@ -10,10 +10,13 @@ const MONTHS = new Map([
 ]);
 // Any element whose class list includes job-period: template packs may change
 // tag names inside the ENTRY zone of their experience partial (the ATS pack
-// renders the period in a <div>, the default pack in a <span>). The class
-// attribute is read the ways HTML allows it to be written: either quote style
-// or none, and whitespace around `=` or inside the quotes.
-const JOB_PERIOD_RE = /<([a-z][a-z0-9]*)\b[^>]*?\sclass\s*=\s*(?:(["'])\s*(?:[^"'\s]+\s+)*job-period(?:\s[^"']*)?\2|job-period(?=[\s>]))[^>]*>([\s\S]*?)<\/\1\s*>/gi;
+// renders the period in a <div>, the default pack in a <span>). A start tag is
+// read the way HTML parses it: a quoted attribute value runs to its closing
+// quote, so a `>` inside one (title="a > b") does not end the tag. Its class
+// attribute is then read the ways HTML allows it to be written: either quote
+// style or none, and whitespace around `=` or inside the quotes.
+const START_TAG_RE = /<([a-z][a-z0-9]*)\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
+const ATTRIBUTE_RE = /([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
 const DISPLAY_PERIOD_MAX = 60;
 
 /**
@@ -75,6 +78,39 @@ function startsLater(a, b) {
   return a.month !== null && b.month !== null && a.month > b.month;
 }
 
+/** Whether a start tag's attribute text gives it the job-period class. */
+function hasJobPeriodClass(attributes) {
+  for (const [, name, doubleQuoted, singleQuoted, unquoted] of attributes.matchAll(ATTRIBUTE_RE)) {
+    const value = doubleQuoted ?? singleQuoted ?? unquoted ?? '';
+    if (name.toLowerCase() === 'class' && value.toLowerCase().split(/\s+/).includes('job-period')) return true;
+  }
+  return false;
+}
+
+/**
+ * The inner HTML of every job-period element, in document order. The scan
+ * resumes after each element's closing tag, and an element that is never
+ * closed is skipped.
+ *
+ * @param {string} html - Rendered CV HTML.
+ * @returns {string[]}
+ */
+function jobPeriodContents(html) {
+  const contents = [];
+  const tags = new RegExp(START_TAG_RE); // a fresh lastIndex for every call
+  let tag;
+  while ((tag = tags.exec(html)) !== null) {
+    if (!hasJobPeriodClass(tag[2])) continue;
+    const close = new RegExp(`</${tag[1]}\\s*>`, 'gi');
+    close.lastIndex = tags.lastIndex;
+    const end = close.exec(html);
+    if (end === null) continue;
+    contents.push(html.slice(tags.lastIndex, end.index));
+    tags.lastIndex = close.lastIndex;
+  }
+  return contents;
+}
+
 /**
  * Enforce reverse-chronological ordering of Work Experience entries.
  *
@@ -95,10 +131,10 @@ export function validateCvExperienceOrder(html, { allowNonChronological = false 
   if (typeof html !== 'string') return;
 
   const entries = [];
-  for (const match of html.matchAll(JOB_PERIOD_RE)) {
+  for (const content of jobPeriodContents(html)) {
     // Strip tags to a fixed point: one pass can leave text that re-forms a
     // tag (`<scr<b>ipt>` -> `<script>`).
-    let text = match[3];
+    let text = content;
     let prev;
     do { prev = text; text = text.replace(/<[^>]*>/g, ''); } while (text !== prev);
     const raw = text.trim();
@@ -118,7 +154,9 @@ export function validateCvExperienceOrder(html, { allowNonChronological = false 
         console.warn(`⚠️  ${message} (proceeding — --allow-nonchronological set)`);
         return;
       }
-      throw new Error(message);
+      throw new Error(
+        `${message} List the roles newest-first and regenerate, or pass ` +
+        `--allow-nonchronological if the candidate asked for this order.`);
     }
   }
 }

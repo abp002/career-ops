@@ -98,6 +98,16 @@ expectOk('accepts concurrent roles sharing a start month', () =>
   }
 }
 
+{
+  let message = null;
+  try { validateCvExperienceOrder(html(['2015 – 2018', '2019 – 2022'])); } catch (err) { message = err && err.message; }
+  if (message && /newest-first/.test(message) && /--allow-nonchronological/.test(message)) {
+    pass('the error says to list the roles newest-first and names the flag for a deliberate order');
+  } else {
+    fail(`the error should say how to fix the order and name --allow-nonchronological: ${JSON.stringify(message)}`);
+  }
+}
+
 // --- Don't-penalize-missing-data discipline ---------------------------------
 
 expectOk('no-ops on a single experience entry', () =>
@@ -154,6 +164,32 @@ expectThrows('reads an unquoted job-period class', () =>
 expectOk('does not read an unquoted class that only starts with job-period', () =>
   validateCvExperienceOrder(
     '<span class=job-periods>2015 – 2018</span><span class=job-periods>2019 – 2022</span>'));
+
+// A `>` inside a quoted attribute value does not end the start tag. Before the
+// class, reading it as the end hid the element; after the class, it left
+// attribute text at the front of the period.
+expectThrows('reads a job-period element after a quoted attribute that contains ">"', () =>
+  validateCvExperienceOrder(
+    '<span title="a > b" class="job-period">2015 – 2018</span><span title="a > b" class="job-period">2019 – 2022</span>'));
+
+{
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => { warnings.push(args.join(' ')); };
+  try {
+    expectOk('proceeds under the escape hatch when a quoted attribute after the class contains ">"', () =>
+      validateCvExperienceOrder(
+        "<div class='job-period' data-note='a > b'>2015 – 2018</div><div class='job-period' data-note='a > b'>2019 – 2022</div>",
+        { allowNonChronological: true }));
+  } finally {
+    console.warn = originalWarn;
+  }
+  if (warnings.length === 1 && warnings[0].includes('"2019 – 2022" appears after "2015 – 2018"')) {
+    pass('reads the period from the end of the start tag, not from a ">" inside a quoted attribute');
+  } else {
+    fail(`the warning should quote both periods without attribute text: ${JSON.stringify(warnings)}`);
+  }
+}
 
 expectThrows('decodes a decimal entity between month and year before reading the month', () =>
   validateCvExperienceOrder(html(['Jan&#160;2021 – Dec 2021', 'Feb 2021 – Present'])));
